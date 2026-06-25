@@ -51,7 +51,7 @@ def test_backtest_populates_trades_and_equity(tmp_path):
     assert state.cash >= 0
 
 
-def test_backtest_requires_common_timestamps(tmp_path):
+def test_backtest_runs_over_union_when_no_common_timestamps(tmp_path):
     db_path = tmp_path / "glassbox_backtest2.db"
     conn = init_db(db_path)
     session_id = start_session(
@@ -65,8 +65,28 @@ def test_backtest_requires_common_timestamps(tmp_path):
     h2 = h1.copy()
     h2.index = h2.index + pd.Timedelta(days=365)  # nessun timestamp in comune
 
+    # Mix di asset senza timestamp in comune (es. crypto + azioni intraday): il backtest
+    # ora gira sull'unione dei timestamp invece di richiedere intersezione esatta.
+    run_backtest(broker, {bot.name: bot}, {"A": h1, "B": h2})
+
+    equity_rows = conn.execute(
+        "SELECT COUNT(*) FROM equity_history WHERE bot_name = ?", (bot.name,)
+    ).fetchone()[0]
+    assert equity_rows == 40  # unione: 20 + 20 timestamp distinti
+
+
+def test_backtest_rejects_empty_histories(tmp_path):
+    db_path = tmp_path / "glassbox_backtest3.db"
+    conn = init_db(db_path)
+    session_id = start_session(
+        conn, mode="backtest", initial_capital=10_000.0, timeframe="1h", fee_pct=0.0, slippage_pct=0.0
+    )
+    broker = PaperBroker(conn, session_id, fee_pct=0.0, slippage_pct=0.0)
+    bot = TechnicalBot(fast_period=3, slow_period=5, rsi_period=3)
+    broker.register_bot(bot.name, initial_capital=10_000.0)
+
     try:
-        run_backtest(broker, {bot.name: bot}, {"A": h1, "B": h2})
+        run_backtest(broker, {bot.name: bot}, {})
         assert False, "doveva sollevare ValueError"
     except ValueError as exc:
-        assert "comune" in str(exc)
+        assert "nessun symbol" in str(exc)

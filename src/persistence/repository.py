@@ -124,6 +124,38 @@ def record_trade(
     conn.commit()
 
 
+def get_previous_live_state(conn: sqlite3.Connection, bot_name: str) -> BotState | None:
+    """Stato del bot nell'ultima sessione *live* chiusa, per la ripresa Opzione B.
+
+    Ritorna None se il bot non ha mai girato in modalita' live: in tal caso
+    si riparte semplicemente dal capitale iniziale, come una sessione nuova.
+    """
+    row = conn.execute(
+        """SELECT b.* FROM bots b JOIN sessions s ON b.session_id = s.id
+           WHERE b.name = ? AND s.mode = 'live'
+           ORDER BY s.started_at DESC LIMIT 1""",
+        (bot_name,),
+    ).fetchone()
+    if row is None:
+        return None
+
+    session_id = row["session_id"]
+    pos_rows = conn.execute(
+        "SELECT symbol, quantity, avg_price FROM positions WHERE bot_name = ? AND session_id = ?",
+        (bot_name, session_id),
+    ).fetchall()
+    positions = {r["symbol"]: Position(r["symbol"], r["quantity"], r["avg_price"]) for r in pos_rows}
+
+    return BotState(
+        name=row["name"],
+        initial_capital=row["initial_capital"],
+        cash=row["cash"],
+        realized_pnl=row["realized_pnl"],
+        fees_paid=row["fees_paid"],
+        positions=positions,
+    )
+
+
 def record_equity(
     conn: sqlite3.Connection, session_id: int, bot_name: str, timestamp: datetime, equity: float
 ) -> None:

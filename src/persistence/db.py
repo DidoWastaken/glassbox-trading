@@ -1,0 +1,80 @@
+"""Schema SQLite e inizializzazione del database GlassBox."""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mode TEXT NOT NULL CHECK (mode IN ('backtest', 'live')),
+    initial_capital REAL NOT NULL,
+    timeframe TEXT NOT NULL,
+    fee_pct REAL NOT NULL,
+    slippage_pct REAL NOT NULL,
+    started_at TEXT NOT NULL,
+    closed_at TEXT,
+    resume_point TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bots (
+    name TEXT NOT NULL,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    initial_capital REAL NOT NULL,
+    cash REAL NOT NULL,
+    realized_pnl REAL NOT NULL DEFAULT 0,
+    fees_paid REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (name, session_id)
+);
+
+CREATE TABLE IF NOT EXISTS positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bot_name TEXT NOT NULL,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    symbol TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    avg_price REAL NOT NULL,
+    UNIQUE (bot_name, session_id, symbol)
+);
+
+CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    bot_name TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+    price REAL NOT NULL,
+    quantity REAL NOT NULL,
+    fee REAL NOT NULL,
+    explanation TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS equity_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES sessions(id),
+    bot_name TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    equity REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_trades_bot ON trades(session_id, bot_name);
+CREATE INDEX IF NOT EXISTS idx_equity_bot ON equity_history(session_id, bot_name);
+"""
+
+
+def get_connection(db_path: str | Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_db(db_path: str | Path) -> sqlite3.Connection:
+    """Crea (se necessario) le tabelle e ritorna una connessione pronta all'uso."""
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = get_connection(db_path)
+    conn.executescript(SCHEMA)
+    conn.commit()
+    return conn

@@ -40,12 +40,33 @@ _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 1.5
 
 
+def _reset_yf_session() -> None:
+    """Invalida cookie e crumb cachati da yfinance nel singleton di processo.
+
+    yfinance memorizza cookie+crumb di Yahoo in un singleton che vive quanto
+    il processo (es. un server Streamlit). Quei crumb scadono col tempo, ma
+    yfinance non li rinfresca automaticamente su risposta vuota: da quel
+    momento ogni chiamata torna vuota finche' il processo non riparte. Qui li
+    azzeriamo cosi' che il tentativo successivo ne ottenga di nuovi e validi.
+    Best-effort: usa attributi interni di yfinance, quindi e' difeso da try.
+    """
+    try:
+        import yfinance.data as yfdata
+
+        inst = yfdata.YfData()
+        inst._cookie = None
+        inst._crumb = None
+    except Exception:  # noqa: BLE001 - reset opportunistico, l'assenza non e' un errore
+        pass
+
+
 def _fetch_with_retry(fetch, symbol: str, what: str) -> pd.DataFrame:
     """Esegue `fetch()` ritentando su risposta vuota o eccezione transitoria.
 
-    Distingue un vuoto persistente (probabile symbol inesistente) da un
-    singolo vuoto transitorio di Yahoo. Solleva DataSourceError solo dopo
-    aver esaurito i tentativi.
+    Tra un tentativo e l'altro azzera cookie/crumb di yfinance: la causa piu'
+    comune di vuoti persistenti in un processo long-lived e' proprio un crumb
+    scaduto. Distingue un vuoto persistente (probabile symbol inesistente) da
+    uno transitorio. Solleva DataSourceError solo dopo aver esaurito i tentativi.
     """
     last_error: Exception | None = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
@@ -56,6 +77,7 @@ def _fetch_with_retry(fetch, symbol: str, what: str) -> pd.DataFrame:
         except Exception as exc:  # noqa: BLE001 - rilanciata come errore di dominio sotto
             last_error = exc
         if attempt < _MAX_ATTEMPTS:
+            _reset_yf_session()  # forza il rinnovo di cookie/crumb prima di ritentare
             time.sleep(_RETRY_BACKOFF_SECONDS * attempt)
 
     if last_error is not None:

@@ -26,8 +26,12 @@ A ogni chiamata, il modello viene **riallenato da zero** usando solo le `train_w
 |---|---|---|
 | `model_type` | `random_forest` | `random_forest` o `logistic_regression` |
 | `train_window` | 200 | barre passate usate per ogni riallenamento |
-| `confidence_threshold` | 0.55 | probabilità minima per agire (appena sopra il caso) |
+| `confidence_threshold` | 0.58 | probabilità minima per agire (più alta = meno trade, meno fee) |
 | `buy_fraction` | 0.25 | frazione della cassa investita a ogni BUY |
+| `retrain_every` | 10 | ogni quante barre riallenare il modello (perf) |
+| `trend_filter_period` | 50 | SMA del filtro di trend: long solo in uptrend (0 = off) |
+
+La previsione ML guida l'ingresso, ma un **filtro di trend** lo consente solo quando l'asset è in salita: su dati rumorosi e in downtrend il modello sbaglia spesso e le fee erodono il capitale. Una soglia di confidenza più alta riduce il churn.
 
 ## Onestà intellettuale
 

@@ -32,9 +32,10 @@ class StatisticalBot(Bot):
         self,
         model_type: str = "random_forest",
         train_window: int = 200,
-        confidence_threshold: float = 0.55,
+        confidence_threshold: float = 0.58,
         buy_fraction: float = 0.25,
         retrain_every: int = 10,
+        trend_filter_period: int = 50,
         random_state: int = 42,
         name: str = "Lo Statistico",
     ):
@@ -48,8 +49,11 @@ class StatisticalBot(Bot):
             raise ValueError("buy_fraction deve essere in (0, 1]")
         if retrain_every < 1:
             raise ValueError("retrain_every deve essere >= 1")
+        if trend_filter_period < 0:
+            raise ValueError("trend_filter_period deve essere >= 0 (0 = filtro disattivato)")
         self.model_type = model_type
         self.train_window = train_window
+        self.trend_filter_period = trend_filter_period
         self.confidence_threshold = confidence_threshold
         self.buy_fraction = buy_fraction
         self.retrain_every = retrain_every
@@ -133,14 +137,31 @@ class StatisticalBot(Bot):
             f"(feature: {', '.join(FEATURE_COLUMNS)})"
         )
 
+        # Filtro di trend: la previsione ML guida l'ingresso, ma solo se l'asset e' in
+        # salita. Evita di andare long su asset in chiaro downtrend (dove il modello su
+        # dati rumorosi sbaglia spesso e le fee erodono il capitale).
+        in_uptrend = True
+        trend_note = ""
+        if self.trend_filter_period > 0 and n_bars >= self.trend_filter_period:
+            trend_sma = history["close"].tail(self.trend_filter_period).mean()
+            in_uptrend = context.last_price >= trend_sma
+            trend_note = f", trend {'UP' if in_uptrend else 'DOWN'} (SMA{self.trend_filter_period} {trend_sma:.2f})"
+
         if predicted_up and confidence >= self.confidence_threshold and context.position_qty == 0:
+            if not in_uptrend:
+                return Signal(
+                    Action.HOLD,
+                    0,
+                    f"HOLD: predizione UP (prob {prob_up:.2f}) ma asset in downtrend{trend_note}: "
+                    f"niente ingressi contro-tendenza. {basis}",
+                )
             quantity = (context.cash * self.buy_fraction) / context.last_price
             if quantity <= 0:
                 return Signal(Action.HOLD, 0, "HOLD: direzione UP prevista ma cassa insufficiente")
             return Signal(
                 Action.BUY,
                 quantity,
-                f"BUY {quantity:.6f} {context.symbol}: predizione UP, probabilita' {prob_up:.2f}. {basis}",
+                f"BUY {quantity:.6f} {context.symbol}: predizione UP, probabilita' {prob_up:.2f}{trend_note}. {basis}",
             )
 
         if not predicted_up and context.position_qty > 0:

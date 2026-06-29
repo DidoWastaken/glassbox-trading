@@ -25,7 +25,7 @@ class TechnicalBot(Bot):
         rsi_period: int = 14,
         rsi_overbought: float = 70.0,
         rsi_oversold: float = 30.0,
-        buy_fraction: float = 0.25,
+        buy_fraction: float = 0.5,
         name: str = "Il Tecnico",
     ):
         if fast_period >= slow_period:
@@ -42,7 +42,7 @@ class TechnicalBot(Bot):
 
     def on_data(self, context: MarketContext) -> Signal:
         close = context.history["close"]
-        min_bars = self.slow_period + 1  # +1 per poter rilevare il crossover
+        min_bars = self.slow_period + 1
 
         if len(close) < min_bars:
             return Signal(
@@ -51,50 +51,47 @@ class TechnicalBot(Bot):
                 f"HOLD: dati insufficienti ({len(close)}/{min_bars} barre necessarie per SMA{self.slow_period})",
             )
 
-        # Per rilevare il crossover servono solo le ultime due SMA e l'ultimo RSI: bastano
-        # le barre piu' recenti. Limitarsi alla coda evita di ricalcolare gli indicatori
-        # sull'intera storia a ogni passo (altrimenti il backtest sarebbe O(n^2)).
+        # Bastano le ultime barre per le SMA correnti: limitarsi alla coda evita di
+        # ricalcolare gli indicatori sull'intera storia a ogni passo (altrimenti O(n^2)).
         close = close.tail(self.slow_period + 5)
         sma_fast = sma(close, self.fast_period)
         sma_slow = sma(close, self.slow_period)
-        rsi_values = rsi(close, self.rsi_period)
+        rsi_now = rsi(close, self.rsi_period).iloc[-1]
 
-        fast_now, fast_prev = sma_fast.iloc[-1], sma_fast.iloc[-2]
-        slow_now, slow_prev = sma_slow.iloc[-1], sma_slow.iloc[-2]
-        rsi_now = rsi_values.iloc[-1]
-
-        golden_cross = fast_prev <= slow_prev and fast_now > slow_now
-        death_cross = fast_prev >= slow_prev and fast_now < slow_now
+        fast_now = sma_fast.iloc[-1]
+        slow_now = sma_slow.iloc[-1]
         price = context.last_price
 
-        if golden_cross and rsi_now < self.rsi_overbought:
+        # Trend-follower a STATO (non solo sull'attimo dell'incrocio): si e' long finche'
+        # la SMA veloce e' sopra la lenta. Cosi' si cavalca un trend anche se l'incrocio e'
+        # avvenuto durante il warmup degli indicatori (dove un rilevamento "a evento"
+        # lo avrebbe perso). L'RSI e' mostrato per trasparenza ma non e' un trigger:
+        # un trend forte e' quasi sempre "ipercomprato" e filtrarlo escluderebbe i trend migliori.
+        uptrend = fast_now > slow_now
+
+        if context.position_qty == 0 and uptrend:
             quantity = (context.cash * self.buy_fraction) / price
             if quantity <= 0:
-                return Signal(Action.HOLD, 0, "HOLD: golden cross ma cassa insufficiente per comprare")
+                return Signal(Action.HOLD, 0, "HOLD: trend rialzista ma cassa insufficiente per comprare")
             return Signal(
                 Action.BUY,
                 quantity,
-                f"BUY {quantity:.6f} {context.symbol}: SMA{self.fast_period} ({fast_now:.2f}) "
-                f"ha superato SMA{self.slow_period} ({slow_now:.2f}) [golden cross], "
-                f"RSI={rsi_now:.1f} < {self.rsi_overbought} (non ipercomprato)",
+                f"BUY {quantity:.6f} {context.symbol}: SMA{self.fast_period} ({fast_now:.2f}) > "
+                f"SMA{self.slow_period} ({slow_now:.2f}) [trend rialzista], RSI={rsi_now:.1f}",
             )
 
-        if context.position_qty > 0 and (death_cross or rsi_now > self.rsi_overbought):
-            reason = (
-                f"SMA{self.fast_period} ({fast_now:.2f}) e' scesa sotto SMA{self.slow_period} "
-                f"({slow_now:.2f}) [death cross]"
-                if death_cross
-                else f"RSI={rsi_now:.1f} > {self.rsi_overbought} (ipercomprato)"
-            )
+        if context.position_qty > 0 and not uptrend:
             return Signal(
                 Action.SELL,
                 context.position_qty,
-                f"SELL {context.position_qty:.6f} {context.symbol}: {reason}",
+                f"SELL {context.position_qty:.6f} {context.symbol}: SMA{self.fast_period} ({fast_now:.2f}) "
+                f"<= SMA{self.slow_period} ({slow_now:.2f}) [trend finito], RSI={rsi_now:.1f}",
             )
 
+        state = "in posizione, trend ancora rialzista" if context.position_qty > 0 else "flat, nessun trend rialzista"
         return Signal(
             Action.HOLD,
             0,
-            f"HOLD: nessuna condizione di ingresso/uscita (SMA{self.fast_period}={fast_now:.2f}, "
-            f"SMA{self.slow_period}={slow_now:.2f}, RSI={rsi_now:.1f})",
+            f"HOLD: {state} (SMA{self.fast_period}={fast_now:.2f}, SMA{self.slow_period}={slow_now:.2f}, "
+            f"RSI={rsi_now:.1f})",
         )

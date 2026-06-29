@@ -65,7 +65,10 @@ CREATE INDEX IF NOT EXISTS idx_equity_bot ON equity_history(session_id, bot_name
 
 
 def get_connection(db_path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+    # check_same_thread=False: Streamlit ri-esegue lo script in thread diversi a ogni
+    # interazione, ma la connessione viene riusata tra un rerun e l'altro (salvata in
+    # session_state). I rerun sono sequenziali, quindi non c'e' accesso concorrente reale.
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     # Il backtest fa molti piccoli commit (un trade/equity per barra). In modalita' di

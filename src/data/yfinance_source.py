@@ -11,7 +11,7 @@ ritentano alcune volte prima di considerare il symbol davvero introvabile.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import yfinance as yf
@@ -24,6 +24,16 @@ _TIMEFRAME_TO_INTERVAL = {
     "15m": "15m",
     "1h": "60m",
     "1d": "1d",
+}
+
+# Finestra storica massima (in giorni) che Yahoo concede per ogni intervallo intraday.
+# I dati al minuto/intraday hanno limiti rigidi: oltre questi, Yahoo restituisce vuoto.
+# Per i dati giornalieri non c'e' limite pratico, quindi non compaiono qui.
+_MAX_LOOKBACK_DAYS = {
+    "1m": 7,
+    "5m": 59,
+    "15m": 59,
+    "60m": 729,
 }
 
 _MAX_ATTEMPTS = 3
@@ -67,6 +77,16 @@ class YFinanceDataSource(DataSource):
         interval = _TIMEFRAME_TO_INTERVAL.get(timeframe)
         if interval is None:
             raise DataSourceError(f"timeframe non supportato da yfinance: {timeframe}")
+
+        # Yahoo rifiuta finestre troppo ampie per gli intervalli intraday (es. 1m: max ~7 giorni).
+        # Restringiamo automaticamente l'inizio al massimo concesso, cosi' la richiesta va a buon
+        # fine con i dati disponibili invece di fallire. Il backtest gestisce serie di lunghezze
+        # diverse tra i symbol senza problemi.
+        max_days = _MAX_LOOKBACK_DAYS.get(interval)
+        if max_days is not None:
+            earliest_allowed = end - timedelta(days=max_days)
+            if start < earliest_allowed:
+                start = earliest_allowed
 
         ticker = yf.Ticker(symbol)
         raw = _fetch_with_retry(

@@ -51,6 +51,10 @@ class TechnicalBot(Bot):
                 f"HOLD: dati insufficienti ({len(close)}/{min_bars} barre necessarie per SMA{self.slow_period})",
             )
 
+        # Per rilevare il crossover servono solo le ultime due SMA e l'ultimo RSI: bastano
+        # le barre piu' recenti. Limitarsi alla coda evita di ricalcolare gli indicatori
+        # sull'intera storia a ogni passo (altrimenti il backtest sarebbe O(n^2)).
+        close = close.tail(self.slow_period + 5)
         sma_fast = sma(close, self.fast_period)
         sma_slow = sma(close, self.slow_period)
         rsi_values = rsi(close, self.rsi_period)

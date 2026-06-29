@@ -40,7 +40,9 @@ def render_sidebar() -> tuple[SessionConfig, datetime, datetime] | None:
     st.sidebar.header("Configurazione sessione")
 
     initial_capital = st.sidebar.number_input("Capitale iniziale", min_value=100.0, value=10_000.0, step=100.0)
-    timeframe = st.sidebar.selectbox("Timeframe", ["1m", "5m", "15m", "1h", "1d"], index=3)
+    # Default su '1d': poche barre, backtest in pochi secondi e abbastanza storico perche'
+    # anche Il Tecnico (SMA200) operi. Gli intraday danno molte piu' barre ed e' piu' lento.
+    timeframe = st.sidebar.selectbox("Timeframe", ["1m", "5m", "15m", "1h", "1d"], index=4)
     assets_raw = st.sidebar.text_area(
         "Asset (uno per riga; crypto con '/', es. BTC/USDT; azioni senza, es. AAPL)",
         value="BTC/USDT\nETH/USDT\nAAPL",
@@ -51,9 +53,15 @@ def render_sidebar() -> tuple[SessionConfig, datetime, datetime] | None:
     slippage_pct = st.sidebar.slider("Slippage (%)", 0.0, 1.0, 0.05, step=0.01) / 100
     ml_model = st.sidebar.selectbox("Modello ML (Lo Statistico)", ["random_forest", "logistic_regression"])
 
-    days_back = st.sidebar.slider("Giorni di storico per il backtest", 7, 365, 60)
+    days_back = st.sidebar.slider("Giorni di storico per il backtest", 7, 365, 365)
     end = datetime.now()
     start = end - timedelta(days=days_back)
+
+    if timeframe in ("1m", "5m", "15m", "1h"):
+        st.sidebar.caption(
+            "⏱️ Gli intraday generano molte barre: con range lunghi il backtest puo' "
+            "richiedere minuti. Per una prova rapida usa '1d'."
+        )
 
     if st.sidebar.button("Avvia backtest", type="primary"):
         config = SessionConfig(

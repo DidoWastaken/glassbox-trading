@@ -8,6 +8,8 @@ env/
 .pytest_cache/
 .ipynb_checkpoints/
 data/*.db
+data/*.db-wal
+data/*.db-shm
 data/*.sqlite
 data/*.sqlite3
 data/*.log

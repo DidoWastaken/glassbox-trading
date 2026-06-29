@@ -68,6 +68,12 @@ def get_connection(db_path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Il backtest fa molti piccoli commit (un trade/equity per barra). In modalita' di
+    # default ogni commit fa un fsync su disco: e' il collo di bottiglia principale.
+    # WAL + synchronous=NORMAL rende questi commit molto piu' economici mantenendo
+    # l'integrita' del database (no corruzione in caso di crash dell'app).
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
 
